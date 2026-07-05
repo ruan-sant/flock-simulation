@@ -30,6 +30,7 @@
 <body>
 
 <canvas id="c"></canvas>
+<canvas id="predCanvas" style="position:fixed; top:0; left:0; pointer-events:none;"></canvas>
 
 <div id="fps"></div>
 
@@ -37,10 +38,14 @@
 (() => {
   const canvas = document.getElementById('c');
   const ctx = canvas.getContext('2d');
+  const predCanvas = document.getElementById('predCanvas');
+  const predCtx = predCanvas.getContext('2d');
   let W, H;
   function resize() {
     W = canvas.width = window.innerWidth;
     H = canvas.height = window.innerHeight;
+    predCanvas.width = W;
+    predCanvas.height = H;
   }
   window.addEventListener('resize', resize);
   resize();
@@ -52,7 +57,7 @@
     sep: 1.4,
     ali: 1.0,
     coh: 0.9,
-    predRadius: 130,
+    predRadius: 70,
     predForce: 3.2
   };
 
@@ -98,7 +103,7 @@
       const a = rand(0, Math.PI * 2);
       boids.push(new Boid(x, y, Math.cos(a) * 2, Math.sin(a) * 2));
     }
-    if (boids.length > 500) boids.splice(0, boids.length - 500);
+    if (boids.length > 10000) boids.splice(0, boids.length - 10000);
   }
   resetBoids();
 
@@ -224,25 +229,29 @@
       ctx.restore();
     }
 
-    if (mouse.active) {
-      const pulse = 1 + Math.sin(Date.now() / 180) * 0.08;
-      const r = 10 * pulse;
-      const grad = ctx.createRadialGradient(mouse.x, mouse.y, 0, mouse.x, mouse.y, settings.predRadius);
-      grad.addColorStop(0, 'rgba(255,70,70,0.10)');
-      grad.addColorStop(1, 'rgba(255,70,70,0)');
-      ctx.fillStyle = grad;
-      ctx.beginPath();
-      ctx.arc(mouse.x, mouse.y, settings.predRadius, 0, Math.PI * 2);
-      ctx.fill();
+  }
 
-      ctx.shadowBlur = 16;
-      ctx.shadowColor = '#ff4646';
-      ctx.fillStyle = '#ff4646';
-      ctx.beginPath();
-      ctx.arc(mouse.x, mouse.y, r, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.shadowBlur = 0;
-    }
+  function drawPredator() {
+    predCtx.clearRect(0, 0, W, H);
+    if (!mouse.active) return;
+
+    const pulse = 1 + Math.sin(Date.now() / 180) * 0.08;
+    const r = 10 * pulse;
+    const grad = predCtx.createRadialGradient(mouse.x, mouse.y, 0, mouse.x, mouse.y, settings.predRadius);
+    grad.addColorStop(0, 'rgba(255,70,70,0.10)');
+    grad.addColorStop(1, 'rgba(255,70,70,0)');
+    predCtx.fillStyle = grad;
+    predCtx.beginPath();
+    predCtx.arc(mouse.x, mouse.y, settings.predRadius, 0, Math.PI * 2);
+    predCtx.fill();
+
+    predCtx.shadowBlur = 16;
+    predCtx.shadowColor = '#ff4646';
+    predCtx.fillStyle = '#ff4646';
+    predCtx.beginPath();
+    predCtx.arc(mouse.x, mouse.y, r, 0, Math.PI * 2);
+    predCtx.fill();
+    predCtx.shadowBlur = 0;
   }
 
   let lastTime = performance.now();
@@ -263,6 +272,7 @@
 
     step();
     draw();
+    drawPredator();
     requestAnimationFrame(loop);
   }
   requestAnimationFrame(loop);
