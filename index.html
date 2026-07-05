@@ -1,0 +1,309 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Boids — Flock vs Predator</title>
+<style>
+  :root {
+    --void: #05060a;
+    --ink: #dfe3ee;
+    --muted: #8b93a8;
+    --calm: #7ce0d3;
+    --alarm: #ff4d4d;
+    --sans: -apple-system, "Segoe UI", sans-serif;
+    --mono: ui-monospace, "Cascadia Mono", "SFMono-Regular", Consolas, monospace;
+  }
+
+  html, body { margin: 0; padding: 0; overflow: hidden; background: var(--void); height: 100%; }
+  canvas { display: block; cursor: none; }
+
+  #hint {
+    position: fixed;
+    bottom: 14px;
+    left: 14px;
+    color: rgba(223,227,238,0.45);
+    font: 11px/1.4 var(--sans);
+    user-select: none;
+  }
+
+  #fps {
+    position: fixed;
+    bottom: 14px;
+    right: 14px;
+    color: rgba(223,227,238,0.4);
+    font: 11px/1.4 var(--mono);
+    user-select: none;
+  }
+</style>
+</head>
+<body>
+
+<canvas id="c"></canvas>
+
+<div id="hint">Move mouse to hunt · click to spawn a burst</div>
+<div id="fps"></div>
+
+<script>
+(() => {
+  const canvas = document.getElementById('c');
+  const ctx = canvas.getContext('2d');
+  let W, H;
+  function resize() {
+    W = canvas.width = window.innerWidth;
+    H = canvas.height = window.innerHeight;
+  }
+  window.addEventListener('resize', resize);
+  resize();
+
+  const settings = {
+    count: 260,
+    perception: 55,
+    maxSpeed: 3.6,
+    sep: 1.4,
+    ali: 1.0,
+    coh: 0.9,
+    predRadius: 130,
+    predForce: 3.2,
+    trail: 14
+  };
+
+  const mouse = { x: -9999, y: -9999, active: false };
+  window.addEventListener('mousemove', (e) => {
+    mouse.x = e.clientX;
+    mouse.y = e.clientY;
+    mouse.active = true;
+  });
+  window.addEventListener('mouseleave', () => { mouse.active = false; });
+  window.addEventListener('touchmove', (e) => {
+    const t = e.touches[0];
+    if (t) { mouse.x = t.clientX; mouse.y = t.clientY; mouse.active = true; }
+  }, { passive: true });
+  window.addEventListener('touchend', () => { mouse.active = false; });
+
+  window.addEventListener('click', (e) => {
+    spawnBurst(e.clientX, e.clientY, 18);
+  });
+
+  function rand(min, max) { return Math.random() * (max - min) + min; }
+
+  class Boid {
+    constructor(x, y, vx, vy) {
+      this.x = x; this.y = y;
+      this.vx = vx; this.vy = vy;
+      this.fear = 0;
+      this.trail = [];
+    }
+  }
+
+  let boids = [];
+  function resetBoids() {
+    boids = [];
+    for (let i = 0; i < settings.count; i++) {
+      boids.push(new Boid(
+        rand(0, W), rand(0, H),
+        rand(-1, 1), rand(-1, 1)
+      ));
+    }
+  }
+  function spawnBurst(x, y, n) {
+    for (let i = 0; i < n; i++) {
+      const a = rand(0, Math.PI * 2);
+      boids.push(new Boid(x, y, Math.cos(a) * 2, Math.sin(a) * 2));
+    }
+    if (boids.length > 900) boids.splice(0, boids.length - 900);
+  }
+  resetBoids();
+
+  const cellSize = 60;
+  let grid = new Map();
+  function cellKey(cx, cy) { return cx + ',' + cy; }
+  function rebuildGrid() {
+    grid = new Map();
+    for (const b of boids) {
+      const cx = Math.floor(b.x / cellSize);
+      const cy = Math.floor(b.y / cellSize);
+      const k = cellKey(cx, cy);
+      let arr = grid.get(k);
+      if (!arr) { arr = []; grid.set(k, arr); }
+      arr.push(b);
+    }
+  }
+  function neighborsOf(b) {
+    const cx = Math.floor(b.x / cellSize);
+    const cy = Math.floor(b.y / cellSize);
+    const out = [];
+    for (let dx = -1; dx <= 1; dx++) {
+      for (let dy = -1; dy <= 1; dy++) {
+        const arr = grid.get(cellKey(cx + dx, cy + dy));
+        if (arr) out.push(...arr);
+      }
+    }
+    return out;
+  }
+
+  function step() {
+    rebuildGrid();
+    const perception2 = settings.perception * settings.perception;
+    const predR2 = settings.predRadius * settings.predRadius;
+
+    for (const b of boids) {
+      let sepX = 0, sepY = 0;
+      let aliX = 0, aliY = 0;
+      let cohX = 0, cohY = 0;
+      let count = 0;
+
+      for (const other of neighborsOf(b)) {
+        if (other === b) continue;
+        const dx = b.x - other.x;
+        const dy = b.y - other.y;
+        const d2 = dx * dx + dy * dy;
+        if (d2 < perception2 && d2 > 0.0001) {
+          const d = Math.sqrt(d2);
+          sepX += dx / d / d;
+          sepY += dy / d / d;
+          aliX += other.vx;
+          aliY += other.vy;
+          cohX += other.x;
+          cohY += other.y;
+          count++;
+        }
+      }
+
+      let ax = 0, ay = 0;
+
+      if (count > 0) {
+        ax += sepX * settings.sep;
+        ay += sepY * settings.sep;
+
+        aliX /= count; aliY /= count;
+        ax += (aliX - b.vx) * 0.05 * settings.ali;
+        ay += (aliY - b.vy) * 0.05 * settings.ali;
+
+        cohX = cohX / count - b.x;
+        cohY = cohY / count - b.y;
+        ax += cohX * 0.0005 * settings.coh;
+        ay += cohY * 0.0005 * settings.coh;
+      }
+
+      if (mouse.active) {
+        const dx = b.x - mouse.x;
+        const dy = b.y - mouse.y;
+        const d2 = dx * dx + dy * dy;
+        if (d2 < predR2) {
+          const d = Math.sqrt(d2) || 0.001;
+          const strength = (1 - d / settings.predRadius) * settings.predForce;
+          ax += (dx / d) * strength;
+          ay += (dy / d) * strength;
+          b.fear = Math.min(1, b.fear + (1 - d / settings.predRadius) * 0.3);
+        }
+      }
+      b.fear *= 0.94;
+
+      b.vx += ax;
+      b.vy += ay;
+
+      const speed = Math.hypot(b.vx, b.vy) || 0.001;
+      const minSpeed = settings.maxSpeed * 0.35;
+      const clamped = Math.max(minSpeed, Math.min(settings.maxSpeed, speed));
+      b.vx = (b.vx / speed) * clamped;
+      b.vy = (b.vy / speed) * clamped;
+
+      b.x += b.vx;
+      b.y += b.vy;
+
+      if (b.x < -20) b.x = W + 20;
+      if (b.x > W + 20) b.x = -20;
+      if (b.y < -20) b.y = H + 20;
+      if (b.y > H + 20) b.y = -20;
+
+      b.trail.push(b.x, b.y);
+      const maxLen = settings.trail * 2;
+      if (b.trail.length > maxLen) b.trail.splice(0, b.trail.length - maxLen);
+    }
+  }
+
+  function draw() {
+    ctx.fillStyle = 'rgba(5, 6, 10, 0.28)';
+    ctx.fillRect(0, 0, W, H);
+
+    for (const b of boids) {
+      const angle = Math.atan2(b.vy, b.vx);
+      const speedRatio = Math.hypot(b.vx, b.vy) / settings.maxSpeed;
+      const hue = (200 - speedRatio * 120 + b.fear * 160) % 360;
+      const lightness = 55 + b.fear * 25;
+      const color = `hsl(${hue}, 85%, ${lightness}%)`;
+
+      if (b.trail.length >= 4) {
+        ctx.beginPath();
+        ctx.moveTo(b.trail[0], b.trail[1]);
+        for (let i = 2; i < b.trail.length; i += 2) {
+          ctx.lineTo(b.trail[i], b.trail[i + 1]);
+        }
+        ctx.strokeStyle = color;
+        ctx.globalAlpha = 0.18;
+        ctx.lineWidth = 1.2;
+        ctx.stroke();
+        ctx.globalAlpha = 1;
+      }
+
+      ctx.save();
+      ctx.translate(b.x, b.y);
+      ctx.rotate(angle);
+      ctx.shadowBlur = 8 + b.fear * 10;
+      ctx.shadowColor = color;
+      ctx.fillStyle = color;
+      ctx.beginPath();
+      ctx.moveTo(6, 0);
+      ctx.lineTo(-5, 3.2);
+      ctx.lineTo(-5, -3.2);
+      ctx.closePath();
+      ctx.fill();
+      ctx.restore();
+    }
+
+    if (mouse.active) {
+      const pulse = 1 + Math.sin(Date.now() / 180) * 0.08;
+      const r = 10 * pulse;
+      const grad = ctx.createRadialGradient(mouse.x, mouse.y, 0, mouse.x, mouse.y, settings.predRadius);
+      grad.addColorStop(0, 'rgba(255,70,70,0.10)');
+      grad.addColorStop(1, 'rgba(255,70,70,0)');
+      ctx.fillStyle = grad;
+      ctx.beginPath();
+      ctx.arc(mouse.x, mouse.y, settings.predRadius, 0, Math.PI * 2);
+      ctx.fill();
+
+      ctx.shadowBlur = 16;
+      ctx.shadowColor = '#ff4646';
+      ctx.fillStyle = '#ff4646';
+      ctx.beginPath();
+      ctx.arc(mouse.x, mouse.y, r, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.shadowBlur = 0;
+    }
+  }
+
+  let lastTime = performance.now();
+  let frames = 0;
+  let fpsTimer = 0;
+  const fpsEl = document.getElementById('fps');
+
+  function loop(now) {
+    const dt = now - lastTime;
+    lastTime = now;
+    frames++;
+    fpsTimer += dt;
+    if (fpsTimer > 500) {
+      fpsEl.textContent = Math.round(frames / (fpsTimer / 1000)) + ' fps · ' + boids.length + ' boids';
+      frames = 0;
+      fpsTimer = 0;
+    }
+
+    step();
+    draw();
+    requestAnimationFrame(loop);
+  }
+  requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>
