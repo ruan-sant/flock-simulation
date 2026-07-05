@@ -63,8 +63,7 @@
     ali: 1.0,
     coh: 0.9,
     predRadius: 130,
-    predForce: 3.2,
-    trail: 14
+    predForce: 3.2
   };
 
   const mouse = { x: -9999, y: -9999, active: false };
@@ -91,7 +90,6 @@
       this.x = x; this.y = y;
       this.vx = vx; this.vy = vy;
       this.fear = 0;
-      this.trail = [];
     }
   }
 
@@ -110,7 +108,7 @@
       const a = rand(0, Math.PI * 2);
       boids.push(new Boid(x, y, Math.cos(a) * 2, Math.sin(a) * 2));
     }
-    if (boids.length > 900) boids.splice(0, boids.length - 900);
+    if (boids.length > 500) boids.splice(0, boids.length - 500);
   }
   resetBoids();
 
@@ -128,19 +126,6 @@
       arr.push(b);
     }
   }
-  function neighborsOf(b) {
-    const cx = Math.floor(b.x / cellSize);
-    const cy = Math.floor(b.y / cellSize);
-    const out = [];
-    for (let dx = -1; dx <= 1; dx++) {
-      for (let dy = -1; dy <= 1; dy++) {
-        const arr = grid.get(cellKey(cx + dx, cy + dy));
-        if (arr) out.push(...arr);
-      }
-    }
-    return out;
-  }
-
   function step() {
     rebuildGrid();
     const perception2 = settings.perception * settings.perception;
@@ -152,20 +137,28 @@
       let cohX = 0, cohY = 0;
       let count = 0;
 
-      for (const other of neighborsOf(b)) {
-        if (other === b) continue;
-        const dx = b.x - other.x;
-        const dy = b.y - other.y;
-        const d2 = dx * dx + dy * dy;
-        if (d2 < perception2 && d2 > 0.0001) {
-          const d = Math.sqrt(d2);
-          sepX += dx / d / d;
-          sepY += dy / d / d;
-          aliX += other.vx;
-          aliY += other.vy;
-          cohX += other.x;
-          cohY += other.y;
-          count++;
+      const cx = Math.floor(b.x / cellSize);
+      const cy = Math.floor(b.y / cellSize);
+      for (let gx = -1; gx <= 1; gx++) {
+        for (let gy = -1; gy <= 1; gy++) {
+          const cell = grid.get(cellKey(cx + gx, cy + gy));
+          if (!cell) continue;
+          for (const other of cell) {
+            if (other === b) continue;
+            const dx = b.x - other.x;
+            const dy = b.y - other.y;
+            const d2 = dx * dx + dy * dy;
+            if (d2 < perception2 && d2 > 0.0001) {
+              const d = Math.sqrt(d2);
+              sepX += dx / d / d;
+              sepY += dy / d / d;
+              aliX += other.vx;
+              aliY += other.vy;
+              cohX += other.x;
+              cohY += other.y;
+              count++;
+            }
+          }
         }
       }
 
@@ -215,10 +208,6 @@
       if (b.x > W + 20) b.x = -20;
       if (b.y < -20) b.y = H + 20;
       if (b.y > H + 20) b.y = -20;
-
-      b.trail.push(b.x, b.y);
-      const maxLen = settings.trail * 2;
-      if (b.trail.length > maxLen) b.trail.splice(0, b.trail.length - maxLen);
     }
   }
 
@@ -231,27 +220,11 @@
       const speedRatio = Math.hypot(b.vx, b.vy) / settings.maxSpeed;
       const hue = (200 - speedRatio * 120 + b.fear * 160) % 360;
       const lightness = 55 + b.fear * 25;
-      const color = `hsl(${hue}, 85%, ${lightness}%)`;
-
-      if (b.trail.length >= 4) {
-        ctx.beginPath();
-        ctx.moveTo(b.trail[0], b.trail[1]);
-        for (let i = 2; i < b.trail.length; i += 2) {
-          ctx.lineTo(b.trail[i], b.trail[i + 1]);
-        }
-        ctx.strokeStyle = color;
-        ctx.globalAlpha = 0.18;
-        ctx.lineWidth = 1.2;
-        ctx.stroke();
-        ctx.globalAlpha = 1;
-      }
 
       ctx.save();
       ctx.translate(b.x, b.y);
       ctx.rotate(angle);
-      ctx.shadowBlur = 8 + b.fear * 10;
-      ctx.shadowColor = color;
-      ctx.fillStyle = color;
+      ctx.fillStyle = `hsl(${hue}, 85%, ${lightness}%)`;
       ctx.beginPath();
       ctx.moveTo(6, 0);
       ctx.lineTo(-5, 3.2);
